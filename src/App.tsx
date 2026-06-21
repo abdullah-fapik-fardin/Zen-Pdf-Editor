@@ -183,7 +183,8 @@ export default function App() {
   // Floating Contextual Toolbar State
   const [activeInput, setActiveInput] = useState<EditEntry | null>(null);
 
-  // Panning State
+  // Zoom and Panning State
+  const [zoomLevel, setZoomLevel] = useState(1.2);
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
@@ -653,19 +654,36 @@ export default function App() {
                  <div className="flex-1 flex flex-col overflow-hidden relative">
                     {/* Viewport Toolbar */}
                     <div className="h-14 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800/80 flex items-center justify-between px-4 sm:px-6 shrink-0 relative z-10 min-h-[56px]">
-                       <span className="text-xs text-zinc-500 font-mono truncate max-w-[140px] sm:max-w-sm hidden sm:block">{file.name}</span>
-                       <div className="flex items-center gap-2 sm:gap-3 bg-zinc-100 dark:bg-zinc-900 rounded-lg p-1 border border-zinc-200 dark:border-zinc-800 shadow-inner ml-auto sm:ml-0">
-                          <button disabled={currentPage <= 1 || isRendering} onClick={() => setCurrentPage(c=>c-1)} className="p-1 min-w-[44px] min-h-[44px] hover:bg-white dark:hover:bg-zinc-800 rounded-md flex items-center justify-center disabled:opacity-30 shadow-sm transition-all"><ChevronLeft className="w-5 h-5 text-zinc-600 dark:text-zinc-300"/></button>
-                          <span className="text-[11px] font-mono tracking-widest text-zinc-500 dark:text-zinc-400 font-bold px-3 whitespace-nowrap">PAGE {currentPage} / {numPages}</span>
-                          <button disabled={currentPage >= numPages || isRendering} onClick={() => setCurrentPage(c=>c+1)} className="p-1 min-w-[44px] min-h-[44px] hover:bg-white dark:hover:bg-zinc-800 rounded-md flex items-center justify-center disabled:opacity-30 shadow-sm transition-all"><ChevronRight className="w-5 h-5 text-zinc-600 dark:text-zinc-300"/></button>
-                       </div>
-                    </div>
-                    
-                    {/* Interactive Canvas Plane */}
-                    <div 
+                       <span className="text-xs text-zinc-500 font-mono truncate max-w-[140px] sm:max-w-xs hidden md:block">{file.name}</span>
+                       
+                       <div className="flex items-center gap-4 ml-auto sm:ml-0">
+                           {/* Zoom Controls */}
+                           <div className="flex items-center gap-2 pr-4 h-10 min-h-[44px] hidden sm:flex border-r border-zinc-200 dark:border-zinc-800">
+                              <button onClick={() => setZoomLevel(z => Math.max(0.2, parseFloat((z - 0.1).toFixed(1))))} className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg flex items-center justify-center text-zinc-500 transition-colors"><Minus className="w-4 h-4"/></button>
+                              <input 
+                                 type="range" 
+                                 min="0.2" max="3.0" step="0.1" 
+                                 value={zoomLevel} 
+                                 onChange={e => setZoomLevel(parseFloat(e.target.value))} 
+                                 className="w-20 lg:w-32 accent-blue-500 cursor-pointer h-1.5 bg-zinc-200 dark:bg-zinc-800 rounded-lg appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-500"
+                              />
+                              <button onClick={() => setZoomLevel(z => Math.min(5.0, parseFloat((z + 0.1).toFixed(1))))} className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg flex items-center justify-center text-zinc-500 transition-colors"><Plus className="w-4 h-4"/></button>
+                              <span className="text-[10px] font-mono tracking-widest text-zinc-400 w-10 text-right inline-block">{Math.round(zoomLevel * 100)}%</span>
+                           </div>
+
+                           <div className="flex items-center gap-2 sm:gap-3 bg-zinc-100 dark:bg-zinc-900 rounded-lg p-1 border border-zinc-200 dark:border-zinc-800 shadow-inner">
+                              <button disabled={currentPage <= 1 || isRendering} onClick={() => setCurrentPage(c=>c-1)} className="p-1 min-w-[36px] min-h-[36px] sm:min-w-[44px] sm:min-h-[44px] hover:bg-white dark:hover:bg-zinc-800 rounded-md flex items-center justify-center disabled:opacity-30 shadow-sm transition-all"><ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5 text-zinc-600 dark:text-zinc-300"/></button>
+                              <span className="text-[10px] sm:text-[11px] font-mono tracking-widest text-zinc-500 dark:text-zinc-400 font-bold px-2 sm:px-3 whitespace-nowrap">PAGE {currentPage} / {numPages}</span>
+                              <button disabled={currentPage >= numPages || isRendering} onClick={() => setCurrentPage(c=>c+1)} className="p-1 min-w-[36px] min-h-[36px] sm:min-w-[44px] sm:min-h-[44px] hover:bg-white dark:hover:bg-zinc-800 rounded-md flex items-center justify-center disabled:opacity-30 shadow-sm transition-all"><ChevronRight className="w-4 h-4 sm:w-5 sm:h-5 text-zinc-600 dark:text-zinc-300"/></button>
+                           </div>
+                        </div>
+                     </div>
+                     
+                     {/* Interactive Canvas Plane */}
+                     <div 
                        ref={viewportRef} 
                        className={cn(
-                           "flex-1 overflow-auto p-4 lg:p-12 flex justify-center bg-zinc-100 dark:bg-zinc-900",
+                           "flex-1 overflow-auto p-4 lg:p-12 flex bg-zinc-100 dark:bg-zinc-900 justify-center",
                            isSpacePressed && !isDragging && "cursor-grab select-none",
                            isDragging && "cursor-grabbing select-none"
                        )}
@@ -677,9 +695,10 @@ export default function App() {
                     >
                        <div 
                          className={cn(
-                           "relative inline-block max-w-[100vw] lg:max-w-full shadow-2xl bg-white transform-gpu origin-top ring-1 ring-zinc-200 dark:ring-zinc-800",
+                           "relative inline-block shadow-2xl bg-white origin-top ring-1 ring-zinc-200 dark:ring-zinc-800 shrink-0 transition-[width] duration-150 ease-out",
                            !isSpacePressed && "cursor-crosshair"
                          )}
+                         style={{ width: pdfDimensions ? `${pdfDimensions.w * zoomLevel}px` : '100%' }}
                          onClick={(e) => {
                              if(!activeInput && !isDragging && !isSpacePressed) handleCanvasInteraction(e);
                          }}
@@ -690,7 +709,7 @@ export default function App() {
                               </div>
                            )}
                            
-                           <canvas ref={canvasRef} className="max-w-[100vw] lg:max-w-full h-auto block" />
+                           <canvas ref={canvasRef} className="w-full h-auto block" />
                            
                            {/* Applied Edits Overlay */}
                            {pdfDimensions && edits.filter(e => e.page === currentPage).map(edit => (
@@ -729,7 +748,7 @@ export default function App() {
                                      <span className="absolute -top-3 -right-3 bg-red-500 text-white rounded-full hidden group-hover:flex z-20 shadow-lg w-8 h-8 items-center justify-center cursor-pointer">
                                         <X className="w-4 h-4" />
                                      </span>
-                                     <span style={{ fontSize: `${edit.size * (viewportRef.current?.getBoundingClientRect().width! / pdfDimensions.w || 1)}px` }}>
+                                     <span style={{ fontSize: `${edit.size * zoomLevel}px` }}>
                                          {edit.text}
                                      </span>
                                   </div>
