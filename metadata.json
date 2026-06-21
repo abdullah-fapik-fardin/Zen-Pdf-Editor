@@ -1,6 +1,6 @@
 {
   "name": "Zen Pdf editor",
-  "description": "An enterprise-grade, multifunctional PDF Management and Editing platform core simulating AI-driven document manipulation.",
+  "description": "Offline PDF Editor and Intelligence Dashboard",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

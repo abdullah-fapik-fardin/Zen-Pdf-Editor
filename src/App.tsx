@@ -156,6 +156,7 @@ const generateExtractiveSummary = (text: string): SummaryResult | null => {
 };
 
 export default function App() {
+  const [showSplash, setShowSplash] = useState(true);
   const [activeTab, setActiveTab] = useState<'editor'|'summary'>('editor');
   
   const [file, setFile] = useState<File | null>(null);
@@ -189,6 +190,11 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [scrollStart, setScrollStart] = useState({ left: 0, top: 0 });
+
+  useEffect(() => {
+    const timer = setTimeout(() => setShowSplash(false), 2500);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -547,6 +553,19 @@ export default function App() {
   };
 
   return (
+    <>
+      {showSplash && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-zinc-950 text-white transition-opacity duration-500">
+          <div className="w-16 h-16 bg-gradient-to-tr from-blue-600 to-indigo-500 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20 shadow-xl border border-white/10 mb-6 drop-shadow-2xl">
+            <LayoutTemplate className="w-8 h-8 text-white" />
+          </div>
+          <h1 className="text-3xl font-bold tracking-tight mb-2">Zen Pdf editor</h1>
+          <p className="text-zinc-400 font-mono text-sm tracking-widest uppercase">Created by Fardin</p>
+          <div className="absolute bottom-12 text-zinc-600">
+             <Loader2 className="w-5 h-5 animate-spin" />
+          </div>
+        </div>
+      )}
     <div className="bg-[#fcfcfc] dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 w-full min-h-[100dvh] flex flex-col font-sans selection:bg-blue-500/20 overflow-hidden transition-colors">
       
       {/* Enterprise Header */}
@@ -557,7 +576,7 @@ export default function App() {
           </div>
           <div className="flex flex-col">
             <span className="text-[10px] font-bold tracking-[0.2em] text-blue-600 dark:text-blue-400 uppercase">Core Systems</span>
-            <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100 tracking-tight truncate">Nexus Document Ops</span>
+            <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100 tracking-tight truncate">Zen Pdf editor</span>
           </div>
         </div>
         
@@ -944,6 +963,7 @@ export default function App() {
       </div>
 
     </div>
+    </>
   );
 }
 
