@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload, X, Save, FileText, Loader2, LayoutTemplate, PenTool, Zap, ChevronLeft, ChevronRight, Type, Eraser, Settings2 } from 'lucide-react';
+import { Upload, X, Save, FileText, Loader2, LayoutTemplate, PenTool, Zap, ChevronLeft, ChevronRight, Check, Minus, Plus, Palette, Activity, AlignLeft, BarChart2, Type, Eraser, Undo2, Redo2, MousePointer2, Hand } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { PDFDocument, rgb } from 'pdf-lib';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import * as pdfjsLib from 'pdfjs-dist';
 
@@ -27,7 +27,7 @@ type EditEntry = {
   size: number;
   fontFamily: string;
   
-  // Masking properties for text replacement
+  // Masking properties
   isReplacement: boolean;
   maskPdfX: number;
   maskPdfY: number;
@@ -53,14 +53,13 @@ type SummaryResult = {
 };
 
 // 1. COMPRESSED TEXT STREAM RECONSTRUCTION
-const extractAndSortText = async (doc: any, maxPages = 10) => {
+const extractAndSortText = async (doc: any, maxPages = 15) => {
     let fullText = "";
     for(let i = 1; i <= Math.min(doc.numPages, maxPages); i++) {
         const page = await doc.getPage(i);
         const textContent = await page.getTextContent();
-        const items = textContent.items as any[];
+        const items = (textContent.items as any[]).filter(item => item.transform);
 
-        // Proximity Sorting: Group by horizontal lines (Y-axis proximity), then order by X-axis
         items.sort((a, b) => {
             const yDiff = b.transform[5] - a.transform[5];
             if (Math.abs(yDiff) > 5) return yDiff; 
@@ -75,11 +74,9 @@ const extractAndSortText = async (doc: any, maxPages = 10) => {
            const currY = item.transform[5];
            const currX = item.transform[4];
            
-           // If Y difference implies a new line
            if (lastY !== -1 && Math.abs(currY - lastY) > 5) {
                pageText += "\n";
            } 
-           // If X difference implies a space
            else if (lastX !== -1 && (currX - lastX) > 5) {
                pageText += " ";
            }
@@ -98,10 +95,10 @@ const generateExtractiveSummary = (text: string): SummaryResult | null => {
   if (!text || text.trim().length === 0) return null;
   
   // High completeness Bangla and English stop-words
-  const bnStopWords = new Set(["এবং", "কিন্তু", "অনুরূপ", "তাহা", "আছে", "হয়", "করে", "জন্য", "থেকে", "ও", "এই", "সেই", "পর", "না", "কি", "যে", "তার", "আমি", "তুমি", "সে", "তারা", "আমরা", "হতে", "সাথে", "হয়"]);
+  const bnStopWords = new Set(["এবং", "কিন্তু", "অনুরূপ", "তাহা", "আছে", "হয়", "করে", "জন্য", "থেকে", "ও", "এই", "সেই", "পর", "না", "কি", "যে", "তার", "আমি", "তুমি", "সে", "তারা", "আমরা", "হতে", "সাথে", "যা", "তা"]);
   const enStopWords = new Set(["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can", "could", "did", "do", "does", "doing", "down", "during", "each", "few", "for", "from", "further", "had", "has", "have", "having", "he", "her", "here", "hers", "herself", "him", "himself", "his", "how", "i", "if", "in", "into", "is", "it", "its", "itself", "just", "me", "more", "most", "my", "myself", "no", "nor", "not", "now", "of", "off", "on", "once", "only", "or", "other", "our", "ours", "ourselves", "out", "over", "own", "same", "she", "should", "so", "some", "such", "than", "that", "the", "their", "theirs", "them", "themselves", "then", "there", "these", "they", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "we", "were", "what", "when", "where", "which", "while", "who", "whom", "why", "will", "with", "you", "your", "yours", "yourself", "yourselves"]);
   
-  // Tokenize sentences by English punctuation and Bangla Dari "।"
+  // Tokenize sentences by Western and Bangla punctuation
   const tokens = text.match(/[^.!?।]+[.!?।]*/g) || [text];
   const sentences = tokens.map(s => s.trim().replace(/[\r\n]+/g, ' ')).filter(s => s.length > 20);
 
@@ -109,15 +106,19 @@ const generateExtractiveSummary = (text: string): SummaryResult | null => {
 
   const wordFreq: Record<string, number> = {};
   
-  // Unicode-aware regex to extract valid word structures globally across English and Bengali without breaking characters
+  // Unicode-aware regex to extract Bengali and Latin script cleanly without breaking conjugates
   const getWords = (s: string) => {
-    return Array.from(s.matchAll(/[\p{Script=Bengali}\p{L}]+/gu)).map(m => m[0].toLowerCase());
+    try {
+        return Array.from(s.matchAll(/[\p{Script=Bengali}\p{L}]+/gu)).map(m => m[0].toLowerCase());
+    } catch(e) {
+        // Fallback for older environments
+        return Array.from(s.matchAll(/[a-z]+|[\u0980-\u09FF]+/gi)).map(m => m[0].toLowerCase());
+    }
   };
 
   sentences.forEach((sentence) => {
     const words = getWords(sentence);
     words.forEach((word) => {
-      // Ignore short punctuation noise and stop words
       if (!enStopWords.has(word) && !bnStopWords.has(word) && word.length > 2) {
         wordFreq[word] = (wordFreq[word] || 0) + 1;
       }
@@ -130,29 +131,22 @@ const generateExtractiveSummary = (text: string): SummaryResult | null => {
     words.forEach((word) => {
       if (wordFreq[word]) score += wordFreq[word];
     });
-    // Normalize string weight vs sentence length
     score = words.length > 0 ? score / Math.sqrt(words.length) : 0; 
     return { index, sentence, score };
   });
 
   sentenceScores.sort((a, b) => b.score - a.score);
   
-  // Top sentences extraction
-  const topSentences = sentenceScores.slice(0, 5);
-  topSentences.sort((a, b) => a.index - b.index); // Re-order chronologically
+  const topSentences = sentenceScores.slice(0, 4);
+  topSentences.sort((a, b) => a.index - b.index);
 
   const allKeyPoints = topSentences.map(s => s.sentence);
-  
-  // Determine Core Objective (Highest Density Sentence)
-  const objective = sentenceScores[0]?.sentence || "Insufficient structural density to determine objective.";
-  
-  // Key points are all top sentences excluding the core objective exact match
+  const objective = sentenceScores[0]?.sentence || "Not enough data density.";
   const keyPoints = allKeyPoints.filter(s => s !== objective);
 
-  // Determine Contextual Vocabulary Context
   const vocabArray = Object.entries(wordFreq).map(([word, count]) => ({word, count}));
   vocabArray.sort((a, b) => b.count - a.count);
-  const vocabulary = vocabArray.slice(0, 15).map(v => v.word);
+  const vocabulary = vocabArray.slice(0, 12).map(v => v.word);
 
   return {
       objective,
@@ -177,13 +171,85 @@ export default function App() {
   const [isExporting, setIsExporting] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   
   const [summaryData, setSummaryData] = useState<SummaryResult | null>(null);
   const [isSummarizing, setIsSummarizing] = useState(false);
   
+  const [pastEdits, setPastEdits] = useState<EditEntry[][]>([]);
   const [edits, setEdits] = useState<EditEntry[]>([]);
+  const [futureEdits, setFutureEdits] = useState<EditEntry[][]>([]);
+  
+  // Floating Contextual Toolbar State
   const [activeInput, setActiveInput] = useState<EditEntry | null>(null);
-  const [showConfigOptions, setShowConfigOptions] = useState(false);
+
+  // Panning State
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [scrollStart, setScrollStart] = useState({ left: 0, top: 0 });
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
+      
+      if (e.code === 'Space' && !isInput) {
+        e.preventDefault();
+        setIsSpacePressed(true);
+      }
+      
+      if (!isInput && (e.ctrlKey || e.metaKey)) {
+        if (e.key === 'z' && !e.shiftKey) {
+            e.preventDefault();
+            setPastEdits(past => {
+                if (past.length === 0) return past;
+                const newPast = [...past];
+                const previousEdits = newPast.pop()!;
+                setEdits(current => {
+                    setFutureEdits(future => [current, ...future]);
+                    return previousEdits;
+                });
+                return newPast;
+            });
+        }
+        if (e.key === 'y' || (e.key === 'z' && e.shiftKey)) {
+            e.preventDefault();
+            setFutureEdits(future => {
+                if (future.length === 0) return future;
+                const newFuture = [...future];
+                const nextEdits = newFuture.shift()!;
+                setEdits(current => {
+                    setPastEdits(past => [...past, current]);
+                    return nextEdits;
+                });
+                return newFuture;
+            });
+        }
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setIsSpacePressed(false);
+        setIsDragging(false);
+      }
+    };
+
+    const handleBlur = () => {
+      setIsSpacePressed(false);
+      setIsDragging(false);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleBlur);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, []);
 
   useEffect(() => {
     if (!pdfBuffer) return;
@@ -199,8 +265,7 @@ export default function App() {
            setNumPages(doc.numPages);
            setCurrentPage(1);
            
-           // Fetch and compile summary
-           const fullText = await extractAndSortText(doc, 10);
+           const fullText = await extractAndSortText(doc, 15);
            const result = generateExtractiveSummary(fullText);
            setSummaryData(result);
         } catch (e) {
@@ -216,9 +281,10 @@ export default function App() {
     if (!pdfDocHandle || !canvasRef.current) return;
     const renderPage = async () => {
         setIsRendering(true);
+        setActiveInput(null); // Close floating toolbar on page change
         try {
             const page = await pdfDocHandle.getPage(currentPage);
-            const viewport = page.getViewport({ scale: 2.0 }); // High-res retina rendering
+            const viewport = page.getViewport({ scale: 2.0 });
             const canvas = canvasRef.current!;
             canvas.width = viewport.width;
             canvas.height = viewport.height;
@@ -231,17 +297,12 @@ export default function App() {
                 await page.render({ canvasContext: ctx, viewport }).promise;
             }
 
-            // Extract bounding boxes and internal font graphics state for text masking
             const textContent = await page.getTextContent({ includeMarkedContent: true });
-            
-            const parsedItems = textContent.items.map((item: any) => {
+            const parsedItems = textContent.items.filter((item: any) => item.transform && item.str).map((item: any) => {
                 const style = textContent.styles[item.fontName];
-                
-                // Color retrieval can be sparse; pdfjs color space depends heavily on internal specs
-                let colorHex = '#1e293b'; // Default fallback color (zinc-800)
+                let colorHex = '#18181b';
                 if (item.color) {
                    if (Array.isArray(item.color)) {
-                      // Parse array formatting
                       colorHex = '#' + item.color.map((c:number) => {
                           const hex = c.toString(16);
                           return hex.length === 1 ? '0' + hex : hex;
@@ -249,7 +310,6 @@ export default function App() {
                    }
                 }
 
-                // Transform matrix: [0]=scaleX, [1]=skewY, [2]=skewX, [3]=scaleY, [4]=translateX, [5]=translateY
                 const fontHeight = Math.abs(item.transform[3]);
                 
                 return {
@@ -282,6 +342,8 @@ export default function App() {
     setFile(uploadedFile);
     setPdfBuffer(arrayBuffer);
     setEdits([]);
+    setPastEdits([]);
+    setFutureEdits([]);
     setActiveTab('editor');
   };
 
@@ -292,9 +354,41 @@ export default function App() {
     if (f) handleFileUpload(f);
   };
 
+  const handleViewportMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (isSpacePressed) {
+      e.preventDefault();
+      setIsDragging(true);
+      setDragStart({ x: e.clientX, y: e.clientY });
+      if (viewportRef.current) {
+        setScrollStart({
+          left: viewportRef.current.scrollLeft,
+          top: viewportRef.current.scrollTop
+        });
+      }
+    }
+  };
+
+  const handleViewportMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (isDragging && isSpacePressed && viewportRef.current) {
+      const dx = e.clientX - dragStart.x;
+      const dy = e.clientY - dragStart.y;
+      viewportRef.current.scrollLeft = scrollStart.left - dx;
+      viewportRef.current.scrollTop = scrollStart.top - dy;
+    }
+  };
+
+  const handleViewportMouseUpOrLeave = () => {
+    if (isDragging) {
+      setIsDragging(false);
+    }
+  };
+
   const handleCanvasInteraction = (e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>) => {
     if(!pdfDimensions || !canvasRef.current || isRendering) return;
     
+    // Prevent default to avoid mobile scroll bouncing when tapping
+    if('touches' in e) e.preventDefault();
+
     let clientX, clientY;
     if ('touches' in e && ('touches' in (e.nativeEvent || e))) {
       const touchEvent = (e as unknown as React.TouchEvent);
@@ -315,9 +409,9 @@ export default function App() {
     const pdfX = x * scaleX;
     const pdfY = pdfDimensions.h - (y * scaleY);
     
-    // 3. WHITEOUT HIT-TEST COMPUTATION WITH SPECIFICATION DETECTION
-    const paddingX = 10;
-    const paddingY = 8;
+    // Check intersection with existing text items
+    const paddingX = 8;
+    const paddingY = 6;
     const tappedItem = pageTextItems.find(item => {
         return (
             pdfX >= item.pdfX - paddingX &&
@@ -328,43 +422,41 @@ export default function App() {
     });
 
     if (tappedItem && tappedItem.str.trim()) {
-        // Replacement Mode: Auto-populate specifications from internal PDF graphics state
         setActiveInput({
             id: Date.now().toString(),
             page: currentPage,
             pdfX: tappedItem.pdfX,
             pdfY: tappedItem.pdfY,
             text: tappedItem.str,
-            color: tappedItem.colorHex || '#1e293b', 
+            color: tappedItem.colorHex || '#18181b', 
             size: Math.max(10, Math.round(tappedItem.fontSize)),
             fontFamily: tappedItem.fontFamily || 'Helvetica',
             isReplacement: true,
-            // Slightly oversize the mask to ensure full block erasure coverage
             maskPdfX: tappedItem.pdfX - 2,
             maskPdfY: tappedItem.pdfY - tappedItem.pdfH * 0.25, 
             maskPdfW: tappedItem.pdfW + 4,
             maskPdfH: tappedItem.pdfH * 1.5,
         });
     } else {
-        // Standard Text Injection Mode
         setActiveInput({
           id: Date.now().toString(),
           page: currentPage,
           pdfX,
           pdfY,
           text: '',
-          color: '#4f46e5',
+          color: '#3b82f6',
           size: 14,
           fontFamily: 'Helvetica',
           isReplacement: false,
           maskPdfX: 0, maskPdfY: 0, maskPdfW: 0, maskPdfH: 0
         });
     }
-    setShowConfigOptions(false);
   };
 
   const commitActiveInput = () => {
     if (activeInput && activeInput.text.trim()) {
+       setPastEdits(past => [...past, edits]);
+       setFutureEdits([]);
        setEdits([...edits, activeInput]);
     }
     setActiveInput(null);
@@ -380,14 +472,15 @@ export default function App() {
         let customFont;
         if(edits.length > 0) {
             try {
-                // Fetch high-quality open-source Bangla/English UTF font payload
                 const rs = await fetch('https://cdn.jsdelivr.net/gh/shironamhin/bangla-fonts/kalpurush/kalpurush.ttf');
-                if(!rs.ok) throw new Error("Network error fetching Kalpurush");
-                const fontBuffer = await rs.arrayBuffer();
-                customFont = await pdfDoc.embedFont(fontBuffer);
+                if(rs.ok) {
+                    const fontBuffer = await rs.arrayBuffer();
+                    customFont = await pdfDoc.embedFont(fontBuffer);
+                }
             } catch (err) {
-                console.warn('Network offline or fetch failed. Custom Unicode may fallback.', err);
-                const { StandardFonts } = require('pdf-lib');
+                console.warn('Fallback due to no network.', err);
+            }
+            if(!customFont) {
                 customFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
             }
         }
@@ -398,18 +491,26 @@ export default function App() {
             if (pageIndex >= 0 && pageIndex < pages.length) {
                 const page = pages[pageIndex];
                 
-                // MASK EXISTING CONTENT FIRST (if replacement active)
+                // ==========================================
+                // 1. ABSOLUTE TEXT WIPEOUT LOGIC
+                // Execute a clean whiteout mask over the exact text coordinates.
+                // This permanently hides the previous text by rendering a solid rectangle.
+                // ==========================================
                 if (edit.isReplacement) {
                     page.drawRectangle({
                         x: edit.maskPdfX,
                         y: edit.maskPdfY,
                         width: edit.maskPdfW,
                         height: edit.maskPdfH,
-                        color: rgb(1, 1, 1), // Standard white wipeout block
+                        color: rgb(1, 1, 1),
                     });
                 }
 
-                // INJECT NEW CONTENT
+                // ==========================================
+                // 2. TEXT REPLACEMENT LOGIC
+                // Render the new string (supporting English and Bangla Unicode)
+                // directly on top of the newly cleaned coordinate space.
+                // ==========================================
                 const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(edit.color);
                 const r = result ? parseInt(result[1], 16) / 255 : 0;
                 const g = result ? parseInt(result[2], 16) / 255 : 0;
@@ -423,7 +524,7 @@ export default function App() {
                        y: curY,
                        size: edit.size,
                        color: rgb(r, g, b),
-                       font: customFont // Using explicitly embedded Kalpurush/Helvetica graph font
+                       font: customFont
                    });
                    curY -= (edit.size * 1.2);
                 }
@@ -438,24 +539,24 @@ export default function App() {
         link.click();
     } catch (err) {
         console.error("Save error:", err);
-        alert("Failed to export complete PDF payload.");
+        alert("Failed to export amended PDF.");
     } finally {
         setIsExporting(false);
     }
   };
 
   return (
-    <div className="bg-zinc-950 text-zinc-300 w-full min-h-[100dvh] flex flex-col font-sans selection:bg-zinc-800 overflow-hidden">
+    <div className="bg-[#fcfcfc] dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 w-full min-h-[100dvh] flex flex-col font-sans selection:bg-blue-500/20 overflow-hidden transition-colors">
       
-      {/* Universal Desktop/Mobile Header */}
-      <header className="h-14 lg:h-16 border-b border-zinc-900 flex items-center justify-between px-4 lg:px-6 bg-zinc-950/80 shrink-0 z-10 backdrop-blur-md">
+      {/* Enterprise Header */}
+      <header className="h-16 lg:h-16 border-b border-zinc-200 dark:border-zinc-900 flex items-center justify-between px-4 lg:px-6 bg-white/80 dark:bg-zinc-950/80 shrink-0 z-20 backdrop-blur-xl">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 lg:w-10 lg:h-10 bg-indigo-600 rounded-lg flex items-center justify-center shadow-[0_0_15px_rgba(79,70,229,0.4)] shrink-0">
-            <Zap className="w-4 h-4 lg:w-5 lg:h-5 text-white" />
+          <div className="w-9 h-9 bg-gradient-to-tr from-blue-600 to-indigo-500 rounded-xl flex items-center justify-center shadow-md shadow-blue-500/20 shrink-0 border border-white/10">
+            <LayoutTemplate className="w-4 h-4 text-white" />
           </div>
           <div className="flex flex-col">
-            <span className="text-[9px] lg:text-[10px] font-bold tracking-widest text-indigo-400 uppercase">Graphesis Core</span>
-            <span className="text-xs lg:text-sm font-semibold text-white tracking-wide truncate">Localized Graphesis</span>
+            <span className="text-[10px] font-bold tracking-[0.2em] text-blue-600 dark:text-blue-400 uppercase">Core Systems</span>
+            <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100 tracking-tight truncate">Nexus Document Ops</span>
           </div>
         </div>
         
@@ -464,7 +565,7 @@ export default function App() {
              <button
                 onClick={handleSavePdf}
                 disabled={isExporting}
-                className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-900/50 disabled:text-indigo-700 text-white text-[10px] lg:text-xs font-bold uppercase tracking-widest rounded-lg transition-colors min-w-[120px] min-h-[44px]"
+                className="flex items-center justify-center gap-2 px-5 py-2.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 disabled:opacity-50 text-[11px] lg:text-xs font-bold uppercase tracking-widest rounded-xl transition-all shadow-sm min-w-[120px] min-h-[44px]"
              >
                 {isExporting ? <Loader2 className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4" />}
                 <span className="hidden sm:inline">Export Amended</span>
@@ -473,28 +574,71 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Responsive Application Layout */}
+      {/* Main Split-Pane Architecture Layout */}
       <main className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
           
-          {/* SECTION A: DIRECT PDF EDITOR WORKSPACE */}
+          {/* LEFT TOOLBAR */}
+          <aside className={cn(
+            "hidden lg:flex w-16 flex-col items-center py-4 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 shrink-0 z-10 gap-3",
+            !file && "opacity-50 pointer-events-none"
+          )}>
+               <button title="Undo (Ctrl+Z)" onClick={() => {
+                        setPastEdits(past => {
+                            if (past.length === 0) return past;
+                            const newPast = [...past];
+                            const previousEdits = newPast.pop()!;
+                            setEdits(current => {
+                                setFutureEdits(future => [current, ...future]);
+                                return previousEdits;
+                            });
+                            return newPast;
+                        });
+                }} className="p-3 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-500 disabled:opacity-30 disabled:hover:bg-transparent" disabled={pastEdits.length === 0}>
+                    <Undo2 className="w-5 h-5" />
+                </button>
+                <button title="Redo (Ctrl+Y)" onClick={() => {
+                        setFutureEdits(future => {
+                            if (future.length === 0) return future;
+                            const newFuture = [...future];
+                            const nextEdits = newFuture.shift()!;
+                            setEdits(current => {
+                                setPastEdits(past => [...past, current]);
+                                return nextEdits;
+                            });
+                            return newFuture;
+                        });
+                }} className="p-3 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-500 disabled:opacity-30 disabled:hover:bg-transparent" disabled={futureEdits.length === 0}>
+                    <Redo2 className="w-5 h-5" />
+                </button>
+
+                <div className="w-8 h-px bg-zinc-200 dark:bg-zinc-800 my-2"></div>
+                <button title="Select Tool" className={cn("p-3 rounded-xl", !isSpacePressed ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400" : "hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-500")}>
+                    <MousePointer2 className="w-5 h-5" />
+                </button>
+                <button title="Pan Tool (Hold Space)" className={cn("p-3 rounded-xl", isSpacePressed ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400" : "hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-500")}>
+                    <Hand className="w-5 h-5" />
+                </button>
+          </aside>
+
+          {/* MAIN SPACE: Editor Workspace */}
           <div className={cn(
-             "h-full flex-col bg-zinc-900 w-full lg:flex lg:flex-1 relative",
+             "h-full flex-col bg-zinc-100 dark:bg-zinc-900 flex-1 shrink lg:flex relative border-r border-zinc-200 dark:border-zinc-800/50 block min-w-0",
              activeTab === 'editor' ? "flex" : "hidden"
           )}>
              {!file ? (
-                 <div className="flex-1 flex flex-col items-center justify-center p-6 bg-zinc-900/50">
+                 <div className="flex-1 flex flex-col items-center justify-center p-6 bg-transparent">
                     <div 
                       onClick={() => fileInputRef.current?.click()}
                       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
                       onDrop={handleDrop}
-                      className="w-full max-w-xl aspect-square sm:aspect-video lg:h-[400px] bg-zinc-950/50 border-2 border-dashed border-zinc-700 rounded-2xl flex flex-col items-center justify-center gap-4 p-8 cursor-pointer hover:bg-zinc-900 hover:border-indigo-500/50 transition-all group"
+                      className="w-full max-w-xl aspect-square sm:aspect-video lg:h-[420px] bg-white dark:bg-zinc-950 border border-dashed border-zinc-300 dark:border-zinc-800 rounded-3xl flex flex-col items-center justify-center gap-5 p-10 cursor-pointer hover:border-blue-500/50 hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-all group shadow-sm"
                     >
-                       <div className="p-5 rounded-xl bg-zinc-800 group-hover:bg-indigo-600/20 transition-colors border border-zinc-700 group-hover:border-indigo-500/50 shadow-inner">
-                         <Upload className="w-8 h-8 text-zinc-400 group-hover:text-indigo-400" />
+                       <div className="p-5 rounded-2xl bg-zinc-50 dark:bg-zinc-900 group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30 transition-colors border border-zinc-200 dark:border-zinc-800 shadow-sm">
+                         <Upload className="w-8 h-8 text-zinc-400 dark:text-zinc-500 group-hover:text-blue-500" />
                        </div>
-                       <div className="flex flex-col items-center text-center gap-2 mt-4">
-                         <span className="text-base font-semibold text-zinc-200">Tap or Drop PDF here</span>
-                         <span className="text-sm text-zinc-500 max-w-[300px]">Features precise unicode metadata extraction for accurate native font replacement.</span>
+                       <div className="flex flex-col items-center text-center gap-2 mt-2">
+                         <span className="text-lg font-semibold text-zinc-800 dark:text-zinc-200">Initialize Workspace</span>
+                         <span className="text-sm text-zinc-500 max-w-[320px] leading-relaxed">Drop a PDF securely. Client-side extraction prevents data egress. Includes native Unicode replacement blocks.</span>
                        </div>
                        <input 
                          type="file" 
@@ -507,34 +651,50 @@ export default function App() {
                  </div>
              ) : (
                  <div className="flex-1 flex flex-col overflow-hidden relative">
-                    {/* PC/Tablet Editor Toolbar */}
-                    <div className="h-14 bg-zinc-950/80 border-b border-zinc-900 flex items-center justify-between px-4 shrink-0 shadow-sm relative z-10 w-full min-h-[44px]">
-                       <span className="text-xs text-zinc-400 font-mono truncate max-w-[150px] sm:max-w-xs">{file.name}</span>
-                       <div className="flex items-center gap-2 sm:gap-3 bg-zinc-900 rounded-lg p-1 border border-zinc-800 shadow-inner">
-                          <button disabled={currentPage <= 1 || isRendering} onClick={() => setCurrentPage(c=>c-1)} className="p-1 min-w-[44px] min-h-[44px] hover:bg-zinc-800 rounded flex items-center justify-center disabled:opacity-30"><ChevronLeft className="w-5 h-5 text-zinc-300"/></button>
-                          <span className="text-[10px] font-mono tracking-widest text-zinc-400 font-bold px-2 whitespace-nowrap">PAGE {currentPage}/{numPages}</span>
-                          <button disabled={currentPage >= numPages || isRendering} onClick={() => setCurrentPage(c=>c+1)} className="p-1 min-w-[44px] min-h-[44px] hover:bg-zinc-800 rounded flex items-center justify-center disabled:opacity-30"><ChevronRight className="w-5 h-5 text-zinc-300"/></button>
+                    {/* Viewport Toolbar */}
+                    <div className="h-14 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800/80 flex items-center justify-between px-4 sm:px-6 shrink-0 relative z-10 min-h-[56px]">
+                       <span className="text-xs text-zinc-500 font-mono truncate max-w-[140px] sm:max-w-sm hidden sm:block">{file.name}</span>
+                       <div className="flex items-center gap-2 sm:gap-3 bg-zinc-100 dark:bg-zinc-900 rounded-lg p-1 border border-zinc-200 dark:border-zinc-800 shadow-inner ml-auto sm:ml-0">
+                          <button disabled={currentPage <= 1 || isRendering} onClick={() => setCurrentPage(c=>c-1)} className="p-1 min-w-[44px] min-h-[44px] hover:bg-white dark:hover:bg-zinc-800 rounded-md flex items-center justify-center disabled:opacity-30 shadow-sm transition-all"><ChevronLeft className="w-5 h-5 text-zinc-600 dark:text-zinc-300"/></button>
+                          <span className="text-[11px] font-mono tracking-widest text-zinc-500 dark:text-zinc-400 font-bold px-3 whitespace-nowrap">PAGE {currentPage} / {numPages}</span>
+                          <button disabled={currentPage >= numPages || isRendering} onClick={() => setCurrentPage(c=>c+1)} className="p-1 min-w-[44px] min-h-[44px] hover:bg-white dark:hover:bg-zinc-800 rounded-md flex items-center justify-center disabled:opacity-30 shadow-sm transition-all"><ChevronRight className="w-5 h-5 text-zinc-600 dark:text-zinc-300"/></button>
                        </div>
                     </div>
                     
-                    {/* Hardware Accelerated Canvas Viewport */}
-                    <div className="flex-1 overflow-auto p-4 lg:p-8 flex justify-center bg-zinc-900 lg:bg-zinc-800/20" id="pdf-viewport">
+                    {/* Interactive Canvas Plane */}
+                    <div 
+                       ref={viewportRef} 
+                       className={cn(
+                           "flex-1 overflow-auto p-4 lg:p-12 flex justify-center bg-zinc-100 dark:bg-zinc-900",
+                           isSpacePressed && !isDragging && "cursor-grab select-none",
+                           isDragging && "cursor-grabbing select-none"
+                       )}
+                       id="pdf-viewport"
+                       onMouseDown={handleViewportMouseDown}
+                       onMouseMove={handleViewportMouseMove}
+                       onMouseUp={handleViewportMouseUpOrLeave}
+                       onMouseLeave={handleViewportMouseUpOrLeave}
+                    >
                        <div 
-                         className="relative inline-block max-w-full shadow-2xl bg-white cursor-crosshair transform-gpu origin-top ring-1 ring-zinc-800 min-h-[300px] min-w-[200px]"
-                         onClick={handleCanvasInteraction}
+                         className={cn(
+                           "relative inline-block max-w-[100vw] lg:max-w-full shadow-2xl bg-white transform-gpu origin-top ring-1 ring-zinc-200 dark:ring-zinc-800",
+                           !isSpacePressed && "cursor-crosshair"
+                         )}
+                         onClick={(e) => {
+                             if(!activeInput && !isDragging && !isSpacePressed) handleCanvasInteraction(e);
+                         }}
                        >
                            {isRendering && (
-                              <div className="absolute inset-0 flex items-center justify-center bg-zinc-900/10 z-10 backdrop-blur-[1px]">
-                                 <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+                              <div className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-zinc-900/50 z-10 backdrop-blur-[2px]">
+                                 <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
                               </div>
                            )}
                            
                            <canvas ref={canvasRef} className="max-w-[100vw] lg:max-w-full h-auto block" />
                            
-                           {/* Client-Side Edit Preview Overlays */}
+                           {/* Applied Edits Overlay */}
                            {pdfDimensions && edits.filter(e => e.page === currentPage).map(edit => (
                               <div key={edit.id}>
-                                  {/* Visually trace the masking frame for replacement tracking */}
                                   {edit.isReplacement && (
                                      <div 
                                         style={{
@@ -544,110 +704,186 @@ export default function App() {
                                             width: `${(edit.maskPdfW / pdfDimensions.w) * 100}%`,
                                             height: `${(edit.maskPdfH / pdfDimensions.h) * 100}%`,
                                         }}
-                                        className="bg-white border-2 border-dashed border-zinc-300/30 backdrop-blur-sm z-0"
+                                        className="bg-white z-0"
                                      />
                                   )}
-                                  
-                                  {/* Render Adjusted Output Text string placement */}
                                   <div 
                                      style={{ 
                                         position: 'absolute', 
                                         left: `${(edit.pdfX / pdfDimensions.w) * 100}%`, 
                                         top: `${(1 - (edit.pdfY / pdfDimensions.h)) * 100}%`,
                                         color: edit.color,
-                                        fontSize: 'clamp(10px, 1.8vw, 24px)',
+                                        fontSize: 'clamp(10px, 100%, 24px)', // Let CSS map reasonably to PDF scale
                                         transform: 'translate(0%, -100%)',
                                         lineHeight: 1.2,
                                         whiteSpace: 'pre'
                                      }}
-                                     className="group z-10 border border-transparent hover:border-dashed hover:border-red-500/80 hover:bg-red-500/5 rounded transition-colors cursor-pointer"
+                                     className="group z-10 border border-transparent hover:border-dashed hover:border-red-500/80 hover:bg-red-50/50 dark:hover:bg-red-500/10 rounded transition-colors cursor-pointer"
                                      onClick={(e) => {
                                         e.stopPropagation();
+                                        setPastEdits(past => [...past, edits]);
+                                        setFutureEdits([]);
                                         setEdits(edits.filter(x => x.id !== edit.id));
                                      }}
                                   >
-                                     <span className="absolute -top-3 -right-3 bg-red-600 text-white rounded-full p-1.5 hidden group-hover:flex z-20 shadow-lg min-w-[40px] min-h-[40px] items-center justify-center">
-                                        <X className="w-5 h-5" />
+                                     <span className="absolute -top-3 -right-3 bg-red-500 text-white rounded-full hidden group-hover:flex z-20 shadow-lg w-8 h-8 items-center justify-center cursor-pointer">
+                                        <X className="w-4 h-4" />
                                      </span>
-                                     {edit.text}
+                                     <span style={{ fontSize: `${edit.size * (viewportRef.current?.getBoundingClientRect().width! / pdfDimensions.w || 1)}px` }}>
+                                         {edit.text}
+                                     </span>
                                   </div>
                               </div>
                            ))}
+
+                           {/* FLOATING CONTEXTUAL TOOLBAR */}
+                           {activeInput && pdfDimensions && (
+                               <div 
+                                  style={{
+                                      position: 'absolute',
+                                      left: `${(activeInput.pdfX / pdfDimensions.w) * 100}%`,
+                                      top: `${(1 - ((activeInput.pdfY + (activeInput.maskPdfH || 20)) / pdfDimensions.h)) * 100}%`,
+                                      transform: 'translate(-50%, -100%)',
+                                      marginTop: '-16px'
+                                  }}
+                                  className="z-50 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-2xl shadow-black/20 rounded-2xl p-4 flex flex-col gap-4 min-w-[340px] max-w-[90vw] animate-in slide-in-from-bottom-2 fade-in duration-200"
+                                  onClick={e => e.stopPropagation()}
+                               >
+                                   <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-white dark:bg-zinc-900 border-b border-r border-zinc-200 dark:border-zinc-800 transform rotate-45"></div>
+                                   
+                                   <div className="flex items-center justify-between pb-3 border-b border-zinc-100 dark:border-zinc-800/80">
+                                      <div className="flex items-center gap-2 text-zinc-800 dark:text-锌-100">
+                                         {activeInput.isReplacement ? <Eraser className="w-4 h-4 text-orange-500" /> : <Type className="w-4 h-4 text-blue-500" />}
+                                         <span className="text-xs font-bold uppercase tracking-widest">{activeInput.isReplacement ? "Override Stream" : "Inject Segment"}</span>
+                                      </div>
+                                      <button onClick={() => setActiveInput(null)} className="w-11 h-11 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full flex items-center justify-center transition-colors text-zinc-500 shrink-0"><X className="w-4 h-4"/></button>
+                                   </div>
+
+                                   <textarea
+                                      value={activeInput.text}
+                                      onChange={e => setActiveInput({...activeInput, text: e.target.value})}
+                                      autoFocus
+                                      className="w-full h-[80px] bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 text-[13px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none selection:bg-blue-200 dark:selection:bg-blue-900"
+                                      placeholder="Type new Unicode payload..."
+                                   />
+                                   
+                                   <div className="flex items-center justify-between gap-3 p-1">
+                                      <div className="flex flex-col gap-1 w-1/2">
+                                          <label className="text-[9px] font-mono tracking-widest uppercase text-zinc-400 ml-1">Family</label>
+                                          <select 
+                                              value={activeInput.fontFamily} 
+                                              onChange={(e) => setActiveInput({...activeInput, fontFamily: e.target.value})}
+                                              className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 h-10 text-[11px] font-mono text-zinc-700 dark:text-zinc-300 focus:outline-none focus:border-blue-500 appearance-none min-h-[44px]"
+                                          >
+                                              <option value="Helvetica">Helvetica</option>
+                                              <option value="Times-Roman">Times-Roman</option>
+                                              <option value="Courier">Courier</option>
+                                              <option value={activeInput.fontFamily}>{activeInput.fontFamily} (Detected)</option>
+                                          </select>
+                                      </div>
+
+                                      <div className="flex flex-col gap-1 w-1/4">
+                                          <label className="text-[9px] font-mono tracking-widest uppercase text-zinc-400 ml-1 text-center">Pt Size</label>
+                                          <div className="flex items-center bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg h-10 min-h-[44px]">
+                                             <button onClick={() => setActiveInput(prev => ({...prev!, size: Math.max(6, prev!.size - 1)}))} className="flex-1 flex justify-center text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><Minus className="w-3 h-3"/></button>
+                                             <input type="number" min="6" max="144" value={activeInput.size} onChange={e => setActiveInput({...activeInput, size: parseInt(e.target.value)||12})} className="w-8 bg-transparent text-center text-[11px] font-mono text-zinc-700 dark:text-zinc-300 focus:outline-none appearance-none" />
+                                             <button onClick={() => setActiveInput(prev => ({...prev!, size: Math.min(144, prev!.size + 1)}))} className="flex-1 flex justify-center text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"><Plus className="w-3 h-3"/></button>
+                                          </div>
+                                      </div>
+
+                                      <div className="flex flex-col gap-1 w-1/4">
+                                         <label className="text-[9px] font-mono tracking-widest uppercase text-zinc-400 ml-1 text-center">Tint</label>
+                                         <div className="relative w-full h-10 min-h-[44px] rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-800">
+                                             <input type="color" value={activeInput.color} onChange={e => setActiveInput({...activeInput, color: e.target.value})} className="absolute -inset-2 w-[200%] h-[200%] cursor-pointer" />
+                                         </div>
+                                      </div>
+                                   </div>
+                                   
+                                   <div className="flex gap-2 mt-2">
+                                       <button onClick={() => setActiveInput(null)} className="flex-1 py-2.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 text-[11px] font-bold tracking-widest uppercase rounded-lg transition-colors min-h-[44px]">Cancel</button>
+                                       <button onClick={commitActiveInput} disabled={!activeInput.text.trim()} className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold tracking-widest uppercase rounded-lg transition-colors disabled:opacity-50 min-h-[44px]">Apply Edit</button>
+                                   </div>
+                               </div>
+                           )}
                        </div>
                     </div>
                  </div>
              )}
           </div>
 
-          {/* SECTION B: ADVANCED UNICODE GRAPHESIS SUMMARIZER DASHBOARD */}
+          {/* RIGHT PANEL 35%: Executive Summary Dashboard */}
           <div className={cn(
-             "h-full w-full lg:w-[480px] xl:w-[540px] bg-zinc-950 lg:border-l border-zinc-900 flex-col shrink-0 lg:flex shadow-2xl relative",
-             activeTab === 'summary' ? "flex" : "hidden"
+             "h-full flex-col bg-white dark:bg-zinc-950 flex-1 lg:flex shrink-0 border-l border-zinc-200 dark:border-zinc-900 shadow-xl z-20 relative",
+             activeTab === 'summary' ? "flex" : "hidden lg:flex"
           )}>
-             <div className="p-4 lg:p-5 border-b border-zinc-900 flex items-center justify-between shrink-0 h-16 bg-zinc-900/50">
+             <div className="p-5 border-b border-zinc-100 dark:border-zinc-900 flex items-center justify-between shrink-0 h-16 sm:h-[72px] bg-zinc-50/50 dark:bg-zinc-900/30">
                 <div className="flex items-center gap-3">
-                   <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-lg">
-                       <LayoutTemplate className="w-4 h-4" />
+                   <div className="p-2.5 bg-emerald-100 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-xl shadow-sm">
+                       <Activity className="w-5 h-5" />
                    </div>
                    <div className="flex flex-col">
-                       <span className="text-xs font-bold uppercase tracking-widest text-zinc-100">Linguistic Framework</span>
-                       <span className="text-[10px] text-zinc-500 font-mono mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis">Statistical extraction via Unicode density</span>
+                       <span className="text-sm font-bold tracking-tight text-zinc-900 dark:text-zinc-100">Executive Diagnostics</span>
+                       <span className="text-[10px] text-zinc-500 font-mono mt-0.5 tracking-wider uppercase">Offline NLP Array</span>
                    </div>
                 </div>
              </div>
              
-             <div className="flex-1 overflow-y-auto p-5 relative pb-28 md:pb-6">
+             <div className="flex-1 overflow-y-auto p-5 lg:p-8 relative pb-28 md:pb-8">
                  {!file && (
-                    <div className="flex flex-col items-center justify-center h-full text-zinc-500 text-center px-4 min-h-[300px]">
-                      <FileText className="w-12 h-12 mb-5 text-zinc-800 stroke-[1.5]" />
-                      <p className="text-sm font-bold text-zinc-400">Offline Parser Inactive</p>
-                      <p className="text-xs mt-2 max-w-[250px] leading-relaxed">Provide a document to test semantic reconstruction and frequency indexing offline.</p>
+                    <div className="flex flex-col items-center justify-center h-full text-zinc-400 dark:text-zinc-600 text-center px-6 min-h-[300px]">
+                      <BarChart2 className="w-16 h-16 mb-6 stroke-1 text-zinc-300 dark:text-zinc-800" />
+                      <p className="text-base font-semibold text-zinc-600 dark:text-zinc-400">Array Standing By</p>
+                      <p className="text-sm mt-3 max-w-[280px] leading-relaxed">Initialize a document to generate structured structural matrices and deep vocabulary density analysis.</p>
                     </div>
                  )}
 
                  {isSummarizing && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950/80 backdrop-blur-md z-10 p-6 text-center">
-                       <div className="relative">
-                           <Loader2 className="w-10 h-10 text-emerald-500 animate-spin mb-4" />
-                       </div>
-                       <h3 className="text-sm font-bold text-white mb-1 tracking-wide">Executing Graphesis</h3>
-                       <p className="text-[10px] uppercase font-mono tracking-widest text-zinc-500">Unpacking token density blocks mapping script domains</p>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md z-10 p-6 text-center">
+                       <Loader2 className="w-12 h-12 text-emerald-500 animate-spin mb-6" />
+                       <h3 className="text-base font-bold text-zinc-900 dark:text-white mb-2 tracking-tight">Extracting Semantics</h3>
+                       <p className="text-[10px] uppercase font-mono tracking-widest text-zinc-500">Cross-comparing unicode density</p>
                     </div>
                  )}
 
                  {file && !isSummarizing && summaryData && (
-                    <div className="space-y-6 flex flex-col gap-2">
+                    <div className="space-y-6 flex flex-col mx-auto max-w-lg">
                       
-                      {/* Structure Zone 1: Core Objective */}
-                      <div className="bg-emerald-950/20 border border-emerald-900/40 rounded-xl p-5 mb-2 shadow-inner group transition-all">
-                          <h3 className="text-[11px] font-bold text-emerald-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                             <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399] animate-pulse"></div>
-                             Core Document Objective
+                      {/* CARD 1: Core Objective */}
+                      <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 rounded-2xl p-6 shadow-sm">
+                          <h3 className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                             <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981] animate-pulse"></div>
+                             Principal Objective
                           </h3>
-                          <p className="text-sm text-zinc-200 leading-relaxed font-serif pt-1 pl-1 border-l border-emerald-800/50">
+                          <p className="text-sm text-zinc-800 dark:text-zinc-200 leading-relaxed font-serif">
                              {summaryData.objective}
                           </p>
                       </div>
                       
-                      {/* Structure Zone 2: Key Data Points */}
-                      <div className="space-y-4">
-                        <h3 className="text-[11px] font-bold text-zinc-400 uppercase tracking-widest pl-1 mt-4">Key Data Points & Structural Insights</h3>
-                        {summaryData.keyPoints.map((sentence, i) => (
-                          <div key={i} className="py-2.5 px-4 bg-zinc-900/40 border border-zinc-800/60 rounded-xl relative group">
-                             <span className="absolute left-4 top-4 w-1.5 h-1.5 rounded bg-zinc-700"></span>
-                             <p className="text-xs text-zinc-400 leading-relaxed font-serif pl-4">
-                               {sentence}
-                             </p>
+                      {/* CARD 2: Structural Insights */}
+                      <div className="bg-white dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800/60 rounded-2xl p-6 shadow-sm">
+                          <h3 className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-5 flex items-center gap-2">
+                             <AlignLeft className="w-3.5 h-3.5" /> Key Structural Insights
+                          </h3>
+                          <div className="space-y-4">
+                            {summaryData.keyPoints.map((sentence, i) => (
+                              <div key={i} className="relative pl-5 group">
+                                 <span className="absolute left-0 top-2 w-1.5 h-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600 group-hover:scale-150 transition-transform"></span>
+                                 <p className="text-[13px] text-zinc-600 dark:text-zinc-400 leading-relaxed font-serif">
+                                   {sentence}
+                                 </p>
+                              </div>
+                            ))}
                           </div>
-                        ))}
                       </div>
 
-                      {/* Structure Zone 3: Contextual Vocabulary Array */}
-                      <div className="pt-6 border-t border-zinc-900 mt-4 space-y-4">
-                         <h3 className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Contextual Vocabulary Clusters</h3>
+                      {/* CARD 3: Contextual Vocabulary Analytics */}
+                      <div className="bg-white dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800/60 rounded-2xl p-6 shadow-sm">
+                         <h3 className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-5 flex items-center gap-2">
+                             <Zap className="w-3.5 h-3.5 text-orange-500" /> Contextual Vocabulary Array
+                         </h3>
                          <div className="flex flex-wrap gap-2">
                             {summaryData.vocabulary.map((vocabItem, i) => (
-                               <span key={i} className="text-xs px-3 py-1.5 bg-zinc-900 border border-zinc-800/80 rounded-lg text-zinc-300 font-mono hover:bg-zinc-800 transition-colors cursor-default whitespace-nowrap inline-flex">
+                               <span key={i} className="text-[11px] px-3 py-1.5 bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg text-zinc-700 dark:text-zinc-300 font-mono hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors cursor-default whitespace-nowrap inline-flex shadow-sm">
                                    {vocabItem}
                                </span>
                             ))}
@@ -661,102 +897,34 @@ export default function App() {
           
       </main>
 
-      {/* SECURE OVERRIDE MODAL: Mobile + Desktop Touch form */}
-      {activeInput && (
-         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200"
-              onClick={() => setActiveInput(null)}>
-            <div className="w-full max-w-[420px] bg-zinc-950 border border-zinc-800 p-6 rounded-2xl shadow-2xl flex flex-col gap-5"
-                 onClick={e => e.stopPropagation()}>
-                 
-                 <div className="flex items-center justify-between pb-4 border-b border-zinc-800">
-                    <div className="flex items-center gap-2">
-                       {activeInput.isReplacement ? <Eraser className="w-5 h-5 text-orange-400" /> : <Type className="w-5 h-5 text-indigo-400" />}
-                       <span className="text-[13px] font-bold text-white uppercase tracking-widest">
-                          {activeInput.isReplacement ? "Override Metadata Matrix" : "Inject Text segment"}
-                       </span>
-                    </div>
-                    <button onClick={() => setActiveInput(null)} className="p-3 bg-zinc-900 hover:bg-zinc-800 rounded-lg min-w-[44px] min-h-[44px] flex items-center justify-center transition-colors"><X className="w-5 h-5 text-zinc-400"/></button>
-                 </div>
-                 
-                 <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] text-zinc-500 font-mono tracking-widest uppercase mb-1">String Data (EN / \p&#123;Script=Bengali&#125;)</label>
-                    <textarea
-                      value={activeInput.text}
-                      onChange={e => setActiveInput({...activeInput, text: e.target.value})}
-                      autoFocus
-                      className="w-full h-[100px] bg-zinc-900 border border-zinc-700/50 rounded-xl p-4 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 resize-none transition-all shadow-inner"
-                      placeholder="Enter typography payload..."
-                    />
-                 </div>
-                 
-                 {/* Metadata Config Override Control Panel */}
-                 <div className="flex flex-col gap-3">
-                     <button type="button" onClick={() => setShowConfigOptions(!showConfigOptions)} className="flex items-center gap-2 py-2 text-[10px] font-mono tracking-widest uppercase text-indigo-400 bg-transparent min-h-[44px] min-w-[44px]">
-                         <Settings2 className="w-4 h-4" /> 
-                         {showConfigOptions ? "Collapse Options" : "View Extracted Config "}
-                     </button>
-
-                     {showConfigOptions && (
-                        <div className="grid grid-cols-2 gap-4 p-4 bg-zinc-900/50 rounded-xl border border-zinc-800/80 animate-in slide-in-from-top-2 duration-300">
-                            
-                            <div className="col-span-2 flex flex-col gap-2">
-                               <label className="text-[10px] text-zinc-500 font-mono tracking-widest uppercase truncate">Source Font Profile</label>
-                               <div className="h-11 bg-zinc-950 border border-zinc-700/50 rounded-lg px-3 flex items-center text-xs text-zinc-400 font-mono">
-                                  {activeInput.fontFamily} (Detected)
-                               </div>
-                            </div>
-
-                            <div className="flex flex-col gap-2">
-                               <label className="text-[10px] text-zinc-500 font-mono tracking-widest uppercase">Paint Hex Override</label>
-                               <input type="color" value={activeInput.color} onChange={e => setActiveInput({...activeInput, color: e.target.value})} className="w-full h-11 p-1 rounded-lg border border-zinc-700 bg-zinc-900 cursor-pointer min-h-[44px]" />
-                            </div>
-
-                            <div className="flex flex-col gap-2">
-                               <label className="text-[10px] text-zinc-500 font-mono tracking-widest uppercase">Point Size Override</label>
-                               <input type="number" min="8" max="144" value={activeInput.size} onChange={e => setActiveInput({...activeInput, size: parseInt(e.target.value) || 14})} className="w-full h-11 bg-zinc-900 border border-zinc-700 rounded-lg px-3 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 min-h-[44px] text-center" />
-                            </div>
-                        </div>
-                     )}
-                 </div>
-                 
-                 <button 
-                   onClick={commitActiveInput}
-                   disabled={!activeInput.text.trim()}
-                   className="w-full mt-2 py-3.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-800 disabled:text-zinc-500 disabled:shadow-none text-white text-[11px] font-bold tracking-widest uppercase rounded-xl transition-all active:scale-[0.98] min-h-[44px] shadow-[0_0_20px_rgba(79,70,229,0.25)]"
-                 >
-                   Commit Coordinates & Mask
-                 </button>
-            </div>
-         </div>
-      )}
-
       {/* MOBILE: BOTTOM NAVIGATION TAB BAR */}
-      <div className="flex lg:hidden bg-zinc-950 border-t border-zinc-900 shrink-0 shadow-[0_-10px_20px_rgba(0,0,0,0.4)] pb-safe z-40 fixed bottom-0 left-0 right-0 h-[64px]">
+      <div className="flex lg:hidden bg-white dark:bg-zinc-950 border-t border-zinc-200 dark:border-zinc-900 shrink-0 shadow-[0_-10px_20px_rgba(0,0,0,0.05)] z-40 fixed bottom-0 left-0 right-0 h-[72px] pb-safe">
           <button 
              onClick={() => setActiveTab('editor')} 
              className={cn(
-                "flex-1 py-3 flex flex-col items-center justify-center gap-1.5 transition-colors min-h-[64px]", 
-                activeTab === 'editor' ? "text-indigo-400 bg-indigo-900/10" : "text-zinc-500 hover:text-zinc-300"
+                "flex-1 py-2 flex flex-col items-center justify-center gap-1.5 transition-colors min-h-[64px]", 
+                activeTab === 'editor' ? "text-blue-600 dark:text-blue-400" : "text-zinc-400 dark:text-zinc-500"
              )}
           >
              <PenTool className="w-5 h-5" />
              <span className="text-[10px] font-bold uppercase tracking-wider">Workspace</span>
           </button>
           
-          <div className="w-px bg-zinc-900 my-2"></div>
+          <div className="w-px h-8 bg-zinc-200 dark:bg-zinc-800 my-auto"></div>
           
           <button 
              onClick={() => setActiveTab('summary')} 
              className={cn(
-                "flex-1 py-3 flex flex-col items-center justify-center gap-1.5 transition-colors min-h-[64px]", 
-                activeTab === 'summary' ? "text-emerald-400 bg-emerald-900/10" : "text-zinc-500 hover:text-zinc-300"
+                "flex-1 py-2 flex flex-col items-center justify-center gap-1.5 transition-colors min-h-[64px]", 
+                activeTab === 'summary' ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-400 dark:text-zinc-500"
              )}
           >
-             <LayoutTemplate className="w-5 h-5" />
-             <span className="text-[10px] font-bold uppercase tracking-wider">Intelligence Array</span>
+             <Activity className="w-5 h-5" />
+             <span className="text-[10px] font-bold uppercase tracking-wider">Diagnostics</span>
           </button>
       </div>
 
     </div>
   );
 }
+
